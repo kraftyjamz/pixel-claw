@@ -25,6 +25,13 @@ const RECONNECT_BASE_MS = 1_000;
 const RECONNECT_MAX_MS = 30_000;
 const REQUEST_TIMEOUT_MS = 30_000;
 const GATEWAY_PROTOCOL_VERSION = 4;
+const TOKEN_ONLY_SCOPES = [
+  'operator.admin',
+  'operator.read',
+  'operator.write',
+  'chat.read',
+  'session.read',
+];
 
 interface PendingRequest {
   resolve: (value: unknown) => void;
@@ -302,7 +309,7 @@ export class GatewayClient extends EventEmitter {
 
     const clientId = useDeviceAuth ? (this.device?.pairedClientId ?? 'gateway-client') : 'gateway-client';
     const clientMode = useDeviceAuth ? (this.device?.pairedClientMode ?? 'backend') : 'backend';
-    const scopes = useDeviceAuth ? (this.device?.pairedScopes ?? ['operator.read']) : ['operator.read'];
+    const scopes = useDeviceAuth ? (this.device?.pairedScopes ?? ['operator.read']) : TOKEN_ONLY_SCOPES;
     const platform = 'darwin';
 
     const params: Record<string, unknown> = {
