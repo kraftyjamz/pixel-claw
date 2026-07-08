@@ -44,6 +44,8 @@ export class GatewayClient extends EventEmitter {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private pendingRequests: Map<string, PendingRequest> = new Map();
   private shouldReconnect = false;
+  private forceTokenOnlyConnect = false;
+  private lastConnectUsedDeviceAuth = false;
 
   constructor(gatewayUrl: string, authToken: string | null = null, device: DeviceIdentity | null = null) {
     super();
@@ -222,6 +224,12 @@ export class GatewayClient extends EventEmitter {
           console.error(`[gateway] ${protocolError.message}`);
         }
         if (connectErrorCode === 'PAIRING_REQUIRED' || connectErrorCode === 'NOT_PAIRED') {
+          if (this.lastConnectUsedDeviceAuth && !this.forceTokenOnlyConnect) {
+            this.forceTokenOnlyConnect = true;
+            this.reconnectAttempt = 0;
+            console.warn('[gateway] pairing rejected with device auth; retrying with gateway token auth only');
+            return;
+          }
           this.shouldReconnect = false;
           this.clearReconnectTimer();
           const pairingError = new Error(
@@ -281,19 +289,21 @@ export class GatewayClient extends EventEmitter {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
 
     const nonce = payload.nonce as string;
-    if (!this.authToken) {
+    const effectiveToken = this.authToken ?? this.device?.authToken;
+    if (!effectiveToken) {
       console.warn('[gateway] challenge received but no auth token configured');
       return;
     }
 
+    const useDeviceAuth = !!this.device && !this.forceTokenOnlyConnect;
+    this.lastConnectUsedDeviceAuth = useDeviceAuth;
+
     const role = 'operator';
 
-    const clientId = this.device?.pairedClientId ?? 'gateway-client';
-    const clientMode = this.device?.pairedClientMode ?? 'backend';
-    const scopes = this.device?.pairedScopes ?? ['operator.read'];
+    const clientId = useDeviceAuth ? (this.device?.pairedClientId ?? 'gateway-client') : 'gateway-client';
+    const clientMode = useDeviceAuth ? (this.device?.pairedClientMode ?? 'backend') : 'backend';
+    const scopes = useDeviceAuth ? (this.device?.pairedScopes ?? ['operator.read']) : ['operator.read'];
     const platform = 'darwin';
-
-    const effectiveToken = this.device?.authToken ?? this.authToken;
 
     const params: Record<string, unknown> = {
       minProtocol: GATEWAY_PROTOCOL_VERSION,
@@ -314,7 +324,7 @@ export class GatewayClient extends EventEmitter {
       userAgent: 'pixel-claw/1.0.0',
     };
 
-    if (this.device) {
+    if (this.device && useDeviceAuth) {
       const signedAtMs = Date.now();
       const token = effectiveToken ?? '';
 
@@ -352,7 +362,7 @@ export class GatewayClient extends EventEmitter {
     };
 
     this.ws.send(JSON.stringify(connectReq));
-    console.log('[gateway] connect request sent');
+    console.log(`[gateway] connect request sent (${useDeviceAuth ? 'device+token' : 'token-only'})`);
   }
 
   private request<T>(method: string, params: unknown): Promise<T> {

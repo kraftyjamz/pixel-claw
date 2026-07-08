@@ -43,6 +43,7 @@ export function App() {
   keysRef.current = keys
   const [currentRoomId, setCurrentRoomId] = useState('main-hall')
   const [spritesLoaded, setSpritesLoaded] = useState(false)
+  const [spriteLoadError, setSpriteLoadError] = useState<string | null>(null)
   const [showHelp, setShowHelp] = useState(false)
   const [showMonitor, setShowMonitor] = useState(false)
   const [showWardrobe, setShowWardrobe] = useState(false)
@@ -57,7 +58,13 @@ export function App() {
   const roomDefsRef = useRef(createDefaultRooms())
 
   useEffect(() => {
-    loadAllSprites().then(() => setSpritesLoaded(true))
+    loadAllSprites()
+      .then(() => setSpritesLoaded(true))
+      .catch((err) => {
+        const msg = err instanceof Error ? err.message : 'Unknown sprite loading error'
+        console.error('[sprites] failed to load', err)
+        setSpriteLoadError(msg)
+      })
   }, [])
 
   const inputDisabledRef = useRef(interaction.inputDisabled || showWardrobe)
@@ -289,16 +296,17 @@ export function App() {
 
   const CHANNEL_PROVIDERS = new Set(['slack', 'discord', 'telegram', 'whatsapp'])
   const CHANNEL_KEY_RE = /^agent:[^:]+:(slack|discord|telegram|whatsapp):/i
+  const isVisibleSession = (s: typeof sessions[number]) => (
+    s.status === 'running'
+      || s.sessionAlias === 'global'
+      || (!!s.sessionAlias && CHANNEL_KEY_RE.test(s.sessionAlias))
+      || (!!s.origin?.provider && CHANNEL_PROVIDERS.has(s.origin.provider.toLowerCase()))
+  )
+  const visibleSessionCount = sessions.filter(isVisibleSession).length
   const roomInfos = roomDefsRef.current.map(r => ({
     id: r.id,
     name: r.name,
-    agentCount: sessions.filter(s => {
-      const isVisible = s.status === 'running'
-        || s.sessionAlias === 'global'
-        || (!!s.sessionAlias && CHANNEL_KEY_RE.test(s.sessionAlias))
-        || (!!s.origin?.provider && CHANNEL_PROVIDERS.has(s.origin.provider.toLowerCase()))
-      return isVisible && (s.room || 'main-hall') === r.id
-    }).length,
+    agentCount: sessions.filter(s => isVisibleSession(s) && (s.room || 'main-hall') === r.id).length,
   }))
 
   const currentRoomDef = roomDefsRef.current.find(r => r.id === currentRoomId)
@@ -401,7 +409,25 @@ export function App() {
           fontSize: 14,
           color: '#666',
         }}>
-          Loading sprites...
+          {spriteLoadError ? `Sprite load failed: ${spriteLoadError}` : 'Loading sprites...'}
+        </div>
+      )}
+
+      {spritesLoaded && visibleSessionCount === 0 && (
+        <div style={{
+          position: 'absolute',
+          bottom: 16,
+          left: 16,
+          padding: '8px 10px',
+          borderRadius: 6,
+          background: 'rgba(8, 8, 16, 0.84)',
+          border: '1px solid rgba(255, 255, 255, 0.18)',
+          color: '#e0e0e0',
+          fontFamily: 'monospace',
+          fontSize: 12,
+          maxWidth: 320,
+        }}>
+          No visible sessions yet. Press <strong>M</strong> to open monitor, or start a session in OpenClaw.
         </div>
       )}
     </div>
