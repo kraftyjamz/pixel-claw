@@ -31,12 +31,16 @@ function createMockGatewayServer(port: number): {
         const data = JSON.parse(raw.toString());
 
         if (data.type === 'req' && data.method === 'connect') {
-          if (data.params?.auth?.token === TEST_TOKEN) {
+          if (
+            data.params?.auth?.token === TEST_TOKEN &&
+            data.params?.minProtocol === 4 &&
+            data.params?.maxProtocol === 4
+          ) {
             socket.send(JSON.stringify({
               type: 'res',
               id: data.id,
               ok: true,
-              payload: { type: 'hello-ok', protocol: 3, policy: { tickIntervalMs: 15000 } },
+              payload: { type: 'hello-ok', protocol: 4, policy: { tickIntervalMs: 15000 } },
             }));
           }
           return;

@@ -24,6 +24,7 @@ function publicKeyRawBase64Url(publicKeyPem: string): string {
 const RECONNECT_BASE_MS = 1_000;
 const RECONNECT_MAX_MS = 30_000;
 const REQUEST_TIMEOUT_MS = 30_000;
+const GATEWAY_PROTOCOL_VERSION = 4;
 
 interface PendingRequest {
   resolve: (value: unknown) => void;
@@ -173,7 +174,8 @@ export class GatewayClient extends EventEmitter {
     });
 
     ws.on('error', (err: Error) => {
-      this.emit('error', err);
+      this.emit('gateway:error', err);
+      console.error(`[gateway] socket error: ${err.message}`);
     });
   }
 
@@ -208,6 +210,26 @@ export class GatewayClient extends EventEmitter {
       }
       if (data.ok === false && !this.pendingRequests.has(data.id as string)) {
         const err = data.error as Record<string, unknown> | undefined;
+        const details = err?.details as Record<string, unknown> | undefined;
+        const connectErrorCode = String(details?.code ?? err?.code ?? '');
+        if (connectErrorCode === 'PROTOCOL_MISMATCH') {
+          this.shouldReconnect = false;
+          this.clearReconnectTimer();
+          const protocolError = new Error(
+            `Gateway protocol mismatch (client=${GATEWAY_PROTOCOL_VERSION}, expected=${String(details?.expectedProtocol ?? 'unknown')})`
+          );
+          this.emit('gateway:error', protocolError);
+          console.error(`[gateway] ${protocolError.message}`);
+        }
+        if (connectErrorCode === 'PAIRING_REQUIRED' || connectErrorCode === 'NOT_PAIRED') {
+          this.shouldReconnect = false;
+          this.clearReconnectTimer();
+          const pairingError = new Error(
+            `Gateway pairing required: ${String(details?.remediationHint ?? err?.message ?? 'review and approve the pending pairing/scopes')}`
+          );
+          this.emit('gateway:error', pairingError);
+          console.error(`[gateway] ${pairingError.message}`);
+        }
         console.error(`[gateway] connect rejected: ${JSON.stringify(err ?? data)}`);
         return;
       }
@@ -274,8 +296,8 @@ export class GatewayClient extends EventEmitter {
     const effectiveToken = this.device?.authToken ?? this.authToken;
 
     const params: Record<string, unknown> = {
-      minProtocol: 3,
-      maxProtocol: 3,
+      minProtocol: GATEWAY_PROTOCOL_VERSION,
+      maxProtocol: GATEWAY_PROTOCOL_VERSION,
       client: {
         id: clientId,
         version: '1.0.0',
